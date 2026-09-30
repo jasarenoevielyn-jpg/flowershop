@@ -1,0 +1,45 @@
+{
+  "summary": "Post .env-restoration end-to-end verification PASSED. Backend pytest 43/43 green after repairing seeded state drift left by prior iterations (owner2/pending users were status=disabled; Bloom&Petal + Rosa Del Sol shops were status=rejected; Petal Grove was rejected instead of pending). Coverage: (1) 3-role login (customer/owner/owner2/pending/admin) + register-admin with ELAYA-ADMIN-2026 code (valid=200 role=admin, wrong=403, empty=403, /register role=admin=400); (2) /api/upload multipart PNG returns /api/files/... path and /api/files/... serves exact bytes with correct MIME — the 'Unsupported FormDataPart' bug is RESOLVED at the backend layer; (3) /api/owner/products with 3+ images persists and returns image + images populated, primary_flowers[] + flowers_included[] persist across GET; (4) /api/products list + /api/products/{id} return image and images[] populated for 360 viewer; (5) admin approve/reject flow (approve, reject with reason, re-apply) + notifications delivered; admin/shop-owners lists include business_permit_url and owner_email; admin/overview counts (shops_pending/approved/rejected/total_owners/total_shops/total_orders); (6) order creation for in_house/third_party/pickup returns correct status_flow; owner status advance 4-step + rider location update accepted + invalid transitions=400; (7) /api/orders/{id}/pay/cod → payment_status=cod_pending + owner receives 'order' notification; /api/orders/{id}/pay/gcash → PayMongo returns redirect_url + intent_id (test key OK); (8) /api/orders/{id}/tracking public (no auth) returns lat/lng/dest/progress/eta, stationary before out_for_delivery, moves after, honors manual rider override; (9) POST/DELETE /api/favorites/{pid} + GET /api/favorites work (note: URL is path-parameterized, not JSON-bodied); (10) full RBAC (customer & owner blocked from admin, customer blocked from owner). Frontend (390x844): landing page → 'Sign In' modal → customer login → /home renders with 7/7 images loaded, curated bouquets w/ 360° badges + tab bar (Home/Shops/Orders/Profile). /admin-sign-in → 'Sign In as Admin' → /overview renders Customers/Owners/Orders/Revenue tiles + Shop Owner Applications + Status counts + bottom Admin tabs. No red-screen, no page errors, no console errors, no deprecated Expo packages detected in code paths exercised.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "seed state drift (recurring)", "issue": "Same drift as iteration_5 recurred: owner2@elaya.ph & pending@elaya.ph got status=disabled and Bloom&Petal/Rosa Del Sol/Petal Grove all ended status=rejected between iterations, causing 10 ERRORS + 7 FAILURES on first pytest run until manually repaired in Mongo. Root cause: TestAdmin::test_admin_toggle_user_status uses a fresh TEST_ user (fine) but TestShopApplication.test_new_owner_submit_application_and_admin_approve_reject_reapply and other manual/UI paths can reject seeded shops. Backend startup should idempotently reset seeded accounts to their documented status (users active, Bloom&Petal+Rosa Del Sol approved, Petal Grove pending) on every boot to make CI reproducible."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_elaya_backend.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/test_admin_and_primary_flowers.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Recommended) In backend/server.py startup seed, add an idempotent status-reset for the 5 seeded users (active) and 3 seeded shops (Bloom&Petal=approved, Rosa Del Sol=approved, Petal Grove=pending). This is the second iteration in a row where the same drift blocks a clean pytest run.",
+    "(Optional cleanup) Add teardown to TestShopApplication.test_new_owner_submit_application_and_admin_approve_reject_reapply that deletes the created TEST_Shop_* + TEST_Bouquet product so /api/products doesn't accumulate placeholder-image test products between runs (customer marketplace briefly showed a 'TEST_Bouquet' with broken example.com images before I cleaned Mongo).",
+    "(No code change) Review request said 'POST/GET /api/favorites' — actual API is POST /api/favorites/{pid} + DELETE /api/favorites/{pid} + GET /api/favorites. Both work; just confirming the shape for downstream docs."
+  ],
+  "critical_code_review_comments": [
+    "/api/upload multipart handler correctly returns {url:/api/files/<path>, path:<path>}; the previously reported 'Unsupported FormDataPart implementation' bug was a frontend/React Native FormData glitch on prior expo-image-picker path; backend interface is fine and file bytes round-trip byte-for-byte via GET /api/files/<path>.",
+    "/api/favorites uses path parameter {pid} (server.py:696-709) — matches frontend usage; the review-request shorthand 'POST /api/favorites with body {product_id}' is not the implemented contract but is not a bug.",
+    "/api/orders/{oid}/tracking is public (no auth) — verified returns only rider lat/lng, dest lat/lng, progress %, ETA, method. No PII (no customer email, address, phone), safe for share-link UX.",
+    "PayMongo GCash init returns redirect_url + intent_id under test key; /api/orders/{oid}/payment-status polls PayMongo and updates order.payment_status to 'paid' on success — flow verified end-to-end minus the external GCash auth step (test key doesn't complete).",
+    "Seed logic in server.py is not fully idempotent for the STATUS fields of already-existing seeded users/shops — see minor issue."
+  ],
+  "updated_files": [
+    "Mongo state repair only: db.users.updateMany({email:{$in:['owner2@elaya.ph','pending@elaya.ph']}},{$set:{status:'active'}}); db.shops.updateMany({shop_name:{$in:['Bloom & Petal','Rosa Del Sol']}},{$set:{status:'approved'},$unset:{reject_reason:''}}); db.shops.updateOne({shop_name:'Petal Grove'},{$set:{status:'pending'}}); TEST_* users/shops/products/favorites/orders purged."
+  ],
+  "success_rate": {
+    "backend": "100% (43/43 pytest)",
+    "frontend": "100% (landing → customer sign-in → /home + admin sign-in → /overview both render with no errors)"
+  },
+  "seed_data_creation": "None. Reused seeded accounts from /app/memory/test_credentials.md. TEST_* artifacts auto-cleaned; residual pre-existing TEST_* records manually purged from Mongo.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend/tests && EXPO_PUBLIC_BACKEND_URL=$(grep EXPO_PUBLIC_BACKEND_URL /app/frontend/.env | cut -d= -f2) pytest -v -n0 --junitxml=/app/test_reports/pytest/pytest_results.xml. pytest.ini defaults to -n2 --dist loadscope which breaks the cross-class pytest.<attr> handoff between TestOrders and TestPayments/TestLiveTracking — always use -n0. If seed drift returns, repair with: mongosh mongodb://localhost:27017/elaya --eval 'db.users.updateMany({email:{$in:[\"owner2@elaya.ph\",\"pending@elaya.ph\"]}},{$set:{status:\"active\"}}); db.shops.updateMany({shop_name:{$in:[\"Bloom & Petal\",\"Rosa Del Sol\"]}},{$set:{status:\"approved\"},$unset:{reject_reason:\"\"}}); db.shops.updateOne({shop_name:\"Petal Grove\"},{$set:{status:\"pending\"}})'. Frontend admin flow: /admin-sign-in has button text 'Sign In as Admin' (exact); regular customer/owner flow uses landing 'Get Started' or 'Sign In' modal.",
+  "rca_of_issue": "The reported 'Unsupported FormDataPart implementation' upload bug was a symptom of the backend crash-looping due to missing MONGO_URL after the GitHub import that stripped .env files. Once main agent restored backend/.env (MONGO_URL, DB_NAME, JWT_SECRET, PAYMONGO_SECRET_KEY, ADMIN_SIGNUP_CODE, EMERGENT_LLM_KEY, APP_URL) and frontend/.env (EXPO_PUBLIC_BACKEND_URL), backend came up healthy and /api/upload multipart round-trip verified end-to-end (43/43 pytest incl. TestUpload.test_upload_and_fetch which asserts exact byte-equality of the served file). No feature-code fixes required. Only outstanding operational issue is seed-state drift across iterations, addressed via Mongo repair (recommend making startup seed idempotently reset seeded status fields — see action_items)."
+}

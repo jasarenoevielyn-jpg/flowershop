@@ -29,6 +29,11 @@ Design and develop ELAYA, a mobile flower marketplace for Biñan, Laguna. Intera
 - Cleaned leftover TEST_* products with placeholder image URLs.
 - 37/37 backend pytest pass; frontend critical paths verified.
 
+## Session (2026-06-30) — Env restore after GitHub re-import
+- Repo re-import again dropped gitignored .env → backend crash-loop (KeyError: MONGO_URL), app blank on devices (this was the real cause behind "background not visible on mobile", upload errors, blank 360).
+- Recreated backend/.env (MONGO_URL, DB_NAME, JWT_SECRET, PAYMONGO_SECRET_KEY=sk_test_..., ADMIN_SIGNUP_CODE=ELAYA-ADMIN-2026, EMERGENT_LLM_KEY) and frontend/.env (EXPO_PUBLIC_BACKEND_URL + packager vars).
+- Verified: object storage upload+retrieval, 43/43 backend pytest, frontend renders all images + 360 badges, admin login.
+
 ## Backlog / Remaining
 - P1: Google Maps API key (user will add later) — currently Leaflet-based map UI.
 - P2: Rotate360 skeleton loader on first frame; periodic TEST_* cleanup.
