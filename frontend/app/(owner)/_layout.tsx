@@ -24,6 +24,7 @@ export default function OwnerLayout() {
       <Tabs.Screen name="add-bouquet" options={{ href: null }} />
       <Tabs.Screen name="order/[id]" options={{ href: null }} />
       <Tabs.Screen name="chat/[id]" options={{ href: null }} />
+      <Tabs.Screen name="inbox" options={{ href: null }} />
     </Tabs>
   );
 }

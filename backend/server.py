@@ -40,6 +40,7 @@ logger = logging.getLogger("elaya")
 
 Role = Literal["customer", "flower_owner", "admin"]
 DELIVERY_METHODS = ["in_house", "third_party", "pickup"]
+LOW_STOCK_THRESHOLD = 5
 
 # ---------- Models ----------
 class RegisterIn(BaseModel):
@@ -139,6 +140,9 @@ class RiderLocationIn(BaseModel):
     lat: float
     lng: float
 
+class ProofIn(BaseModel):
+    photo_url: str = Field(min_length=1)
+
 class RejectIn(BaseModel):
     reason: str = "Application did not meet requirements."
 
@@ -202,10 +206,10 @@ async def approved_shop(u: dict) -> dict:
         raise HTTPException(403, "Your shop is not approved yet.")
     return shop
 
-async def notify(user_id: str, title: str, body: str, order_id: Optional[str] = None, kind: str = "info"):
+async def notify(user_id: str, title: str, body: str, order_id: Optional[str] = None, kind: str = "info", product_id: Optional[str] = None):
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()), "user_id": user_id, "title": title, "body": body,
-        "order_id": order_id, "kind": kind, "read": False, "created_at": now_iso(),
+        "order_id": order_id, "product_id": product_id, "kind": kind, "read": False, "created_at": now_iso(),
     })
 
 # ---------- Storage / uploads ----------
@@ -427,9 +431,21 @@ async def create_order(data: OrderIn, u=Depends(require("customer"))):
     order["out_for_delivery_at"] = None
     order["rider_manual"] = False
     await db.orders.insert_one(order)
-    # Best-effort stock decrement so low-stock alerts stay realistic
+    # Decrement stock and raise a low-stock alert into the owner's feed when a
+    # bouquet crosses the threshold (deduped against an existing unread alert).
     for i in data.items:
-        await db.products.update_one({"id": i.product_id}, {"$inc": {"stock": -i.quantity}})
+        prod = await db.products.find_one({"id": i.product_id})
+        if not prod:
+            continue
+        before = prod.get("stock", 0) or 0
+        after = before - i.quantity
+        await db.products.update_one({"id": i.product_id}, {"$set": {"stock": after}})
+        crossed = (after <= LOW_STOCK_THRESHOLD and before > LOW_STOCK_THRESHOLD) or (after <= 0 and before > 0)
+        if crossed:
+            dup = await db.notifications.find_one({"user_id": prod["owner_id"], "product_id": i.product_id, "kind": "stock", "read": False})
+            if not dup:
+                label = "is out of stock" if after <= 0 else f"is low on stock ({max(after, 0)} left)"
+                await notify(prod["owner_id"], "⚠️ Stock alert", f"\"{prod['name']}\" {label}. Restock soon.", kind="stock", product_id=i.product_id)
     order.pop("_id", None)
     return order
 
@@ -482,6 +498,19 @@ async def update_rider(oid: str, data: RiderLocationIn, u=Depends(require("flowe
         raise HTTPException(403)
     await db.orders.update_one({"id": oid}, {"$set": {"rider_lat": data.lat, "rider_lng": data.lng, "rider_name": u["name"], "rider_manual": True}})
     return {"ok": True}
+
+@api.patch("/owner/orders/{oid}/proof")
+async def set_delivery_proof(oid: str, data: ProofIn, u=Depends(require("flower_owner"))):
+    """Rider/owner attaches a delivery proof photo. Customer is notified and
+    the photo shows on their order tracking screen."""
+    shop = await approved_shop(u)
+    o = await db.orders.find_one({"id": oid})
+    if not o or shop["id"] not in o["shop_ids"]:
+        raise HTTPException(403)
+    await db.orders.update_one({"id": oid}, {"$set": {"proof_photo": data.photo_url, "proof_at": now_iso(), "updated_at": now_iso()}})
+    await notify(o["customer_id"], "📸 Delivery photo added",
+                 f"The shop added a delivery proof photo for order {o['order_no']}.", order_id=oid, kind="order")
+    return {"ok": True, "proof_photo": data.photo_url}
 
 @api.get("/orders/{oid}/tracking")
 async def order_tracking(oid: str):

@@ -16,6 +16,14 @@ export default function OwnerDashboard() {
   const { data: products = [] } = useQuery({ queryKey: ["my-products"], queryFn: () => api("/owner/products"), enabled: shop?.status === "approved" });
   const { data: orders = [] } = useQuery({ queryKey: ["owner-orders"], queryFn: () => api("/owner/orders"), refetchInterval: 8000, enabled: shop?.status === "approved" });
   const { data: notifs = [] } = useQuery({ queryKey: ["owner-notifs"], queryFn: () => api("/notifications"), refetchInterval: 8000 });
+  const unread = notifs.filter((n: any) => !n.read).length;
+
+  const Bell = ({ dark }: { dark?: boolean }) => (
+    <Pressable testID="inbox-bell" onPress={() => router.push("/(owner)/inbox")} style={[styles.bell, dark && styles.bellDark]} hitSlop={8}>
+      <Text style={{ fontSize: 20 }}>🔔</Text>
+      {unread > 0 && <View style={styles.bellBadge}><Text style={styles.bellBadgeText}>{unread > 9 ? "9+" : unread}</Text></View>}
+    </Pressable>
+  );
 
   if (isLoading) return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
 
@@ -25,7 +33,10 @@ export default function OwnerDashboard() {
       <View style={{ flex: 1, backgroundColor: colors.surface }}>
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingTop: insets.top + spacing.xl, gap: spacing.lg }}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.brandPrimary} />}>
-          <Text style={styles.brand}>Elaya for Shops</Text>
+          <View style={styles.topRow}>
+            <Text style={styles.brand}>Elaya for Shops</Text>
+            <Bell />
+          </View>
           {(!shop || shop.status === "none") && (
             <StatusCard testID="status-none" emoji="🌱" title="Start selling on Elaya"
               body="Submit your shop application with your business permit and details. Our admin will review it before you can list bouquets."
@@ -41,7 +52,7 @@ export default function OwnerDashboard() {
               body={shop.reject_reason || "Your application did not meet the requirements."}
               cta="Re-apply" onPress={() => router.push("/(owner)/application")} />
           )}
-          {notifs.length > 0 && <Notifs notifs={notifs} />}
+          {notifs.length > 0 && <Notifs notifs={notifs} onSeeAll={() => router.push("/(owner)/inbox")} />}
         </ScrollView>
       </View>
     );
@@ -63,6 +74,7 @@ export default function OwnerDashboard() {
           <View style={styles.approvedBadge}><Text style={styles.approvedText}>✓ APPROVED</Text></View>
           <Text style={styles.shopName}>{shop?.shop_name}</Text>
           <Text style={styles.shopLoc}>📍 {shop?.location}</Text>
+          <View style={[styles.bellFloat, { top: insets.top + spacing.md }]}><Bell dark /></View>
         </View>
 
         <View style={styles.metricGrid}>
@@ -84,7 +96,7 @@ export default function OwnerDashboard() {
           </Pressable>
         </View>
 
-        {notifs.length > 0 && <View style={{ paddingHorizontal: spacing.lg }}><Notifs notifs={notifs} /></View>}
+        {notifs.length > 0 && <View style={{ paddingHorizontal: spacing.lg }}><Notifs notifs={notifs} onSeeAll={() => router.push("/(owner)/inbox")} /></View>}
 
         {lowStock.length > 0 && (
           <Pressable testID="low-stock-alert" onPress={() => router.push("/(owner)/products")} style={styles.lowCard}>
@@ -134,10 +146,13 @@ function Metric({ num, label }: { num: any; label: string }) {
   return <View style={styles.metric}><Text style={styles.metricNum}>{num}</Text><Text style={styles.metricLabel}>{label}</Text></View>;
 }
 
-function Notifs({ notifs }: { notifs: any[] }) {
+function Notifs({ notifs, onSeeAll }: { notifs: any[]; onSeeAll?: () => void }) {
   return (
     <View style={{ gap: spacing.sm }}>
-      <Text style={styles.notifHead}>Notifications</Text>
+      <View style={styles.notifHeadRow}>
+        <Text style={styles.notifHead}>Recent Updates</Text>
+        {onSeeAll && <Pressable testID="see-all-updates" onPress={onSeeAll}><Text style={styles.seeAll}>See all →</Text></Pressable>}
+      </View>
       {notifs.slice(0, 4).map((n) => (
         <View key={n.id} style={[styles.notif, !n.read && styles.notifUnread]} testID={`notif-${n.id}`}>
           <Text style={styles.notifTitle}>{n.title}</Text>
@@ -166,6 +181,12 @@ function StatusCard({ emoji, title, body, cta, onPress, color = colors.brandPrim
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
   brand: { fontSize: 30, fontWeight: "300", fontStyle: "italic", color: colors.onSurface },
+  topRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  bell: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
+  bellDark: { backgroundColor: "rgba(255,255,255,0.22)" },
+  bellFloat: { position: "absolute", right: spacing.lg },
+  bellBadge: { position: "absolute", top: 2, right: 2, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.error, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
+  bellBadgeText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" },
   statusCard: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.xl, alignItems: "center", gap: spacing.sm },
   statusTitle: { fontSize: 22, fontWeight: "700", textAlign: "center" },
   statusBody: { color: colors.onSurfaceSecondary, fontSize: 14, lineHeight: 20, textAlign: "center" },
@@ -191,6 +212,8 @@ const styles = StyleSheet.create({
   orderPrice: { color: colors.brandPrimary, fontWeight: "700", fontSize: 15 },
   payTag: { fontSize: 10, fontWeight: "800", marginTop: 2 },
   notifHead: { fontSize: 16, fontWeight: "700", color: colors.onSurface, marginTop: spacing.md },
+  notifHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" },
+  seeAll: { color: colors.brandPrimary, fontWeight: "700", fontSize: 13, marginBottom: 2 },
   lowCard: { marginHorizontal: spacing.lg, marginTop: spacing.lg, backgroundColor: colors.warning + "12", borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.warning + "44", gap: 6 },
   lowHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   lowTitle: { fontSize: 15, fontWeight: "800", color: colors.warning },

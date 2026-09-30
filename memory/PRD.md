@@ -42,6 +42,12 @@ Design and develop ELAYA, a mobile flower marketplace for Biñan, Laguna. Intera
 - Checkout mandatory contact: OrderIn now requires contact_name + contact_phone (422 if missing); checkout has Full Name (prefilled) + Phone fields with validation.
 - Tested: 55/55 backend pytest, all UI flows OK.
 
+## Session (2026-06-30c) — Owner Inbox + Delivery Proof
+- Order Updates Feed: dedicated owner inbox (/(owner)/inbox) with unread badge, mark-all-read, tap-to-navigate; dashboard bell + "see all" link. Low-stock now emits kind=stock notifications (deduped) on stock-dropping orders alongside chat/paid/order alerts.
+- Delivery Photo Proof: PATCH /api/owner/orders/{id}/proof (owner-only) stores proof_photo + notifies customer; owner order screen add-proof (camera on native, gallery fallback/web) with preview; customer Track shows the photo. Added CAMERA/photo/location perms to app.json.
+- Fixed hooks-order bug in owner order detail (proofMut hoisted above early return).
+- Tested: 65/65 backend pytest, all UI flows OK.
+
 ## Backlog / Remaining
 - P1: Google Maps API key (user will add later) — currently Leaflet-based map UI.
 - P2: Rotate360 skeleton loader on first frame; periodic TEST_* cleanup.

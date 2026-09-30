@@ -1,11 +1,14 @@
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, Linking } from "react-native";
+import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
+import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { colors, spacing, radius } from "@/src/theme";
-import { api } from "@/src/api";
+import { api, mediaUrl } from "@/src/api";
+import { uploadFile } from "@/src/upload";
 import LiveTrackMap from "@/src/components/LiveTrackMap";
 
 const LABEL: Record<string, string> = {
@@ -21,6 +24,9 @@ export default function OwnerOrderDetail() {
   const qc = useQueryClient();
   const [locBusy, setLocBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [proofBusy, setProofBusy] = useState(false);
+  const [proofMsg, setProofMsg] = useState<string | null>(null);
+  const [proofBlocked, setProofBlocked] = useState(false);
   const { data: o, isLoading } = useQuery({ queryKey: ["owner-order", id], queryFn: () => api(`/orders/${id}`), enabled: !!id, refetchInterval: 6000 });
   const { data: track } = useQuery({ queryKey: ["owner-track", id], queryFn: () => api(`/orders/${id}/tracking`), enabled: !!id, refetchInterval: 5000 });
 
@@ -31,6 +37,11 @@ export default function OwnerOrderDetail() {
   const riderMut = useMutation({
     mutationFn: (c: { lat: number; lng: number }) => api(`/owner/orders/${id}/rider`, { method: "PATCH", body: JSON.stringify(c) }),
     onSuccess: () => { setMsg("Location shared with customer ✓"); qc.invalidateQueries({ queryKey: ["owner-order", id] }); },
+  });
+  const proofMut = useMutation({
+    mutationFn: (url: string) => api(`/owner/orders/${id}/proof`, { method: "PATCH", body: JSON.stringify({ photo_url: url }) }),
+    onSuccess: () => { setProofMsg("Delivery photo sent to customer ✓"); qc.invalidateQueries({ queryKey: ["owner-order", id] }); },
+    onError: (e: any) => setProofMsg(e.message),
   });
 
   if (isLoading || !o) return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
@@ -46,6 +57,41 @@ export default function OwnerOrderDetail() {
     setLocBusy(true);
     try { const pos = await Location.getCurrentPositionAsync({}); riderMut.mutate({ lat: pos.coords.latitude, lng: pos.coords.longitude }); }
     catch { setMsg("Could not get location"); } finally { setLocBusy(false); }
+  };
+
+  const addProof = async () => {
+    setProofMsg(null); setProofBlocked(false);
+    let uri: string | null = null;
+    if (Platform.OS === "web") {
+      const lib = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!lib.granted) { setProofMsg("Photo permission is needed to attach a delivery photo."); setProofBlocked(!lib.canAskAgain); return; }
+      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.6 });
+      if (r.canceled || !r.assets?.length) return;
+      uri = r.assets[0].uri;
+    } else {
+      const cam = await ImagePicker.requestCameraPermissionsAsync();
+      if (cam.granted) {
+        const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
+        if (r.canceled || !r.assets?.length) return;
+        uri = r.assets[0].uri;
+      } else {
+        // Camera denied — fall back to the gallery so the owner isn't dead-ended.
+        const lib = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!lib.granted) {
+          setProofMsg("Camera and photo access are off. Enable them in Settings to attach a delivery photo.");
+          setProofBlocked(!cam.canAskAgain || !lib.canAskAgain);
+          return;
+        }
+        const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.6 });
+        if (r.canceled || !r.assets?.length) return;
+        uri = r.assets[0].uri;
+      }
+    }
+    if (!uri) return;
+    setProofBusy(true);
+    try { const up = await uploadFile(uri, "delivery-proof.jpg", "image/jpeg"); proofMut.mutate(up.url); }
+    catch (e: any) { setProofMsg(e.message); }
+    finally { setProofBusy(false); }
   };
 
   return (
@@ -124,6 +170,28 @@ export default function OwnerOrderDetail() {
             {msg ? <Text style={styles.msg}>{msg}</Text> : null}
           </View>
         )}
+
+        {o.delivery_method !== "pickup" && (
+          <View>
+            <Text style={styles.section}>Delivery Proof Photo</Text>
+            {o.proof_photo ? (
+              <Image source={{ uri: mediaUrl(o.proof_photo) }} style={styles.proofImg} contentFit="cover" testID="proof-photo" />
+            ) : (
+              <Text style={styles.proofHint}>Snap a photo when you drop off the flowers so the customer sees proof of delivery.</Text>
+            )}
+            <Pressable testID="add-proof-btn" onPress={addProof} disabled={proofBusy || proofMut.isPending} style={styles.proofBtn}>
+              <Text style={styles.proofBtnText}>
+                {proofBusy || proofMut.isPending ? "Uploading..." : o.proof_photo ? "📸 Replace delivery photo" : "📸 Add delivery photo"}
+              </Text>
+            </Pressable>
+            {proofBlocked && (
+              <Pressable testID="proof-settings-btn" onPress={() => Linking.openSettings()} style={styles.settingsBtn}>
+                <Text style={styles.settingsText}>Open Settings</Text>
+              </Pressable>
+            )}
+            {proofMsg ? <Text style={styles.msg}>{proofMsg}</Text> : null}
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -163,4 +231,10 @@ const styles = StyleSheet.create({
   trackStatus: { color: colors.onSurface, fontWeight: "700", fontSize: 13 },
   trackAddr: { color: colors.onSurfaceSecondary, fontSize: 13 },
   trackCoords: { color: colors.muted, fontSize: 11 },
+  proofImg: { width: "100%", height: 220, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary },
+  proofHint: { color: colors.muted, fontSize: 13, lineHeight: 19, marginBottom: spacing.sm },
+  proofBtn: { marginTop: spacing.sm, backgroundColor: colors.brandPrimary, paddingVertical: 13, borderRadius: radius.pill, alignItems: "center" },
+  proofBtnText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: 13 },
+  settingsBtn: { marginTop: spacing.sm, borderWidth: 1, borderColor: colors.borderStrong, paddingVertical: 11, borderRadius: radius.pill, alignItems: "center" },
+  settingsText: { color: colors.onSurface, fontWeight: "700", fontSize: 13 },
 });

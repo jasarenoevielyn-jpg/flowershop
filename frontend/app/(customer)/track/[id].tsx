@@ -1,11 +1,12 @@
 import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from "react-native";
+import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { colors, spacing, radius } from "@/src/theme";
-import { api } from "@/src/api";
+import { api, mediaUrl } from "@/src/api";
 import MapView from "@/src/components/LeafletMap";
 import LiveTrackMap from "@/src/components/LiveTrackMap";
 
@@ -157,6 +158,14 @@ export default function Track() {
             {o.rider_name ? <Text style={styles.info}>🛵 Rider: {o.rider_name}</Text> : null}
           </View>
         )}
+        {o.proof_photo ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Delivery Photo 📸</Text>
+            <Text style={styles.proofNote}>Your flowers were delivered — here's the proof from the shop.</Text>
+            <Image source={{ uri: mediaUrl(o.proof_photo) }} style={styles.proofImg} contentFit="cover" testID="customer-proof-photo" />
+          </View>
+        ) : null}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Items ({o.items.length})</Text>
           {o.items.map((it: any, idx: number) => (
@@ -200,6 +209,8 @@ const styles = StyleSheet.create({
   completeText: { color: colors.onSuccess, fontWeight: "800", fontSize: 13 },
   doneBanner: { marginTop: spacing.md, backgroundColor: colors.success + "18", borderRadius: radius.md, padding: spacing.md, alignItems: "center" },
   doneText: { color: colors.success, fontWeight: "700", fontSize: 13 },
+  proofNote: { color: colors.muted, fontSize: 12, marginBottom: spacing.sm },
+  proofImg: { width: "100%", height: 240, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary },
   payBanner: { flexDirection: "row", alignItems: "center", padding: spacing.md, borderRadius: radius.md, marginTop: spacing.md, gap: spacing.md },
   payTitle: { fontWeight: "800", fontSize: 14 },
   payRef: { color: colors.muted, fontSize: 11, marginTop: 2 },

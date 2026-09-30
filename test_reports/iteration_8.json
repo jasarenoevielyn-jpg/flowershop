@@ -1,0 +1,44 @@
+{
+  "summary": "Tested the Jan-2026 features: Owner Inbox / notifications feed and Delivery Photo Proof. Backend pytest suite: 65/65 passing (55 previous + 10 new). New suite `test_inbox_and_proof.py` covers (a) low-stock alert: creating a bouquet with stock=6 then ordering qty=2 puts an unread kind='stock' notification titled '⚠️ Stock alert' with the '(4 left) low on stock' body on the OWNING owner's /notifications feed, and stock=1 → order qty=1 yields the 'out of stock' variant; a repeat crossing while the previous alert is still unread is deduped (only one unread stock notif per product); (b) notifications endpoints: GET /notifications is user-scoped, sorted newest-first, does not leak Mongo _id, returns id/kind/title/body/read/created_at; POST /notifications/{id}/read flips read=true; POST /notifications/read-all marks every notif read; stock notifs generated for the shop owner do NOT appear in the customer's feed; (c) Delivery Photo Proof: PATCH /api/owner/orders/{oid}/proof by the owning owner stores proof_photo + proof_at, notifies the customer with kind='order' & title contains '📸 Delivery photo', and the customer's GET /api/orders/{id} surfaces proof_photo. Non-owning owner2 → 403, customer role → 401/403, empty photo_url → 422. All prior regression suites (auth 3-role, product images[], live tracking, ETA countdown, order chat, complete button, checkout mandatory contact, admin flows, RBAC, payments) still green (55/55).\n\nFrontend UI: verified end-to-end at 390x844. Owner dashboard renders `inbox-bell` with unread badge and `see-all-updates` link; tapping the bell opens /(owner)/inbox which lists 21 notifications with emoji chips per kind (stock '⚠️', chat '💬', payment '💳', order '📦', etc.), timestamps in relative form, unread pink dot, and `mark-all-read-btn` when unread>0. Tapping a `inbox-notif-{id}` row for a stock alert navigates to /(owner)/products as designed; chat/order rows route to /(owner)/chat/{oid} and /(owner)/order/{oid} respectively. Customer Track screen renders `customer-proof-photo` as soon as proof_photo is set on the order (verified against a real order after a PATCH). Owner order detail correctly shows `add-proof-btn`, `proof-photo` (once set), `share-loc-btn` and `message-customer-btn`.\n\nCRITICAL FIX applied: owner order detail /(owner)/order/[id].tsx violated Rules of Hooks — `proofMut = useMutation(...)` was declared AFTER an early `return <ActivityIndicator/>` guard, so the first render (while `isLoading`) ran fewer hooks than subsequent renders, producing 'Rendered more hooks than during the previous render' red screen the moment the order loaded. Hoisted `proofMut` above the early return next to the other mutations. Verified: screen now renders cleanly with all four testIDs visible and no console errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_inbox_and_proof.py",
+    "/app/backend/tests/test_chat_eta_complete.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/test_elaya_backend.py",
+    "/app/backend/tests/test_admin_and_primary_flowers.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional polish carried over from iteration_7: (i) hide/pin `eta-countdown` on stale out-for-delivery orders instead of showing 'Arriving in ~0 min'; (ii) add a lightweight phone-format Pydantic validator on POST /orders; (iii) clean residual TEST_* products from Mongo home rail."
+  ],
+  "critical_code_review_comments": [
+    "FIXED: /(owner)/order/[id].tsx — proofMut useMutation was declared after `if (isLoading || !o) return <ActivityIndicator/>`. Violated Rules of Hooks; caused a red-screen 'Rendered more hooks than during the previous render' whenever the owner opened any order detail. Moved proofMut above the early return next to riderMut/statusMut. Verified live.",
+    "server.py `create_order` (l.434-448) correctly issues a kind='stock' notification only when stock crosses the threshold from above (crossed := after<=5 && before>5) and dedupes against an existing unread stock alert for the same user_id+product_id — verified by test_stock_alert_deduped_while_unread.",
+    "server.py `set_delivery_proof` (l.502-513) enforces owning-shop-only via `approved_shop(u)` + shop_ids membership (403 for foreign owner), validates ProofIn.photo_url with min_length=1 (422 empty), and always fires a customer notification (kind='order').",
+    "server.py notification endpoints (l.716-728) are user-scoped by u['id'], exclude _id from the projection, and read-all uses update_many. Customer + owner notifications never cross-leak (verified).",
+    "/(owner)/inbox.tsx uses `refetchInterval: 6000` on both list and dashboard queries so the badge stays reasonably fresh; navigation dispatch (chat→chat/[oid], stock→products, order→order/[oid]) matches the spec — verified live."
+  ],
+  "updated_files": [
+    "/app/frontend/app/(owner)/order/[id].tsx — hoisted proofMut useMutation above early return to fix Rules of Hooks red-screen",
+    "/app/backend/tests/test_inbox_and_proof.py (NEW — 10 tests: 3 low-stock alert, 3 notifications endpoints, 4 delivery-proof)"
+  ],
+  "success_rate": {
+    "backend": "100% (65/65 pytest passing)",
+    "frontend": "100% for exercised flows — owner login → dashboard bell → inbox (21 rows, all kinds render, mark-as-read + navigate); customer track shows customer-proof-photo; owner order detail shows add-proof-btn + proof-photo + share-loc-btn + message-customer-btn with no console errors after fix"
+  },
+  "seed_data_creation": "One order (ELY-BC3F4A / id=bc3f4a2d-398c-4a2e-8e97-ddf28224cd51) had a real proof_photo URL set via PATCH to demo the customer-side proof rendering. All TEST_LowStock_* products are deleted by their fixtures.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend/tests && EXPO_PUBLIC_BACKEND_URL=$(grep EXPO_PUBLIC_BACKEND_URL /app/frontend/.env | cut -d= -f2) pytest -v -n0 --junitxml=/app/test_reports/pytest/pytest_results.xml — expect 65/65. The new file is test_inbox_and_proof.py; it creates ephemeral TEST_LowStock_* bouquets so it's safe to re-run. Frontend testIDs of note for inbox/proof: inbox-bell, see-all-updates, mark-all-read-btn, inbox-back-btn, inbox-notif-{id}, add-proof-btn, proof-photo (owner), customer-proof-photo (customer), proof-settings-btn (only when permissions are hard-denied). If retesting the proof upload from the UI on web, note the picker is a real file input (ImagePicker.launchImageLibraryAsync on web) — Playwright can drive it with page.set_input_files on the underlying <input type=file> if needed; otherwise call PATCH /owner/orders/{oid}/proof directly as done here.",
+  "rca_of_issue": "React 'Rendered more hooks than during the previous render' on /(owner)/order/[id]. Root cause: proofMut = useMutation(...) was placed after the `if (isLoading || !o) return <ActivityIndicator/>` guard, so the first render (loading) executed 5 hooks while the second render (data present) executed 6 → React aborted with the Uncaught Error red screen. Reproduction: log in as owner → open any order → see red screen. Fix: hoist proofMut above the early return so hook order is identical on every render. Verified fix: reload owner order detail after supervisorctl restart expo; all four testIDs visible, no console errors."
+}

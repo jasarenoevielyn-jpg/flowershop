@@ -9,14 +9,20 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.elayaroledispatch.lgrfhi"
+      "bundleIdentifier": "com.emergent.elayaroledispatch.lgrfhi",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Take a delivery photo as proof of drop-off",
+        "NSPhotoLibraryUsageDescription": "Attach bouquet and delivery photos to your shop",
+        "NSLocationWhenInUseUsageDescription": "Share the rider's live location during delivery"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.emergent.elayaroledispatch.lgrfhi"
+      "package": "com.emergent.elayaroledispatch.lgrfhi",
+      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
     },
     "web": {
       "bundler": "metro",
