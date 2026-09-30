@@ -22,6 +22,7 @@ export default function OwnerOrderDetail() {
   const [locBusy, setLocBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const { data: o, isLoading } = useQuery({ queryKey: ["owner-order", id], queryFn: () => api(`/orders/${id}`), enabled: !!id, refetchInterval: 6000 });
+  const { data: track } = useQuery({ queryKey: ["owner-track", id], queryFn: () => api(`/orders/${id}/tracking`), enabled: !!id, refetchInterval: 5000 });
 
   const statusMut = useMutation({
     mutationFn: (status: string) => api(`/owner/orders/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
@@ -56,12 +57,17 @@ export default function OwnerOrderDetail() {
       </View>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.lg, paddingBottom: insets.bottom + spacing.xxl }}>
         <View style={styles.box}>
-          <Row k="Customer" v={o.customer_name} />
+          <Row k="Customer" v={o.contact_name || o.customer_name} />
+          {o.contact_phone ? <Row k="Phone" v={o.contact_phone} /> : null}
           <Row k="Delivery" v={{ in_house: "In-House Delivery", third_party: "Third-Party", pickup: "Pick-Up" }[o.delivery_method as string] || o.delivery_method} />
           <Row k="Payment" v={o.payment_status === "paid" ? `Paid (${o.payment_ref || "GCash"})` : o.payment_method === "gcash" ? "GCash · unpaid" : "Cash on Delivery"} />
           {o.delivery_method !== "pickup" && <Row k="Address" v={o.delivery_address} />}
           {o.notes ? <Row k="Notes" v={o.notes} /> : null}
         </View>
+
+        <Pressable testID="message-customer-btn" onPress={() => router.push(`/(owner)/chat/${o.id}` as any)} style={styles.msgCustomerBtn}>
+          <Text style={styles.msgCustomerText}>💬 Message Customer</Text>
+        </Pressable>
 
         <View style={styles.box}>
           <Text style={styles.section}>Items</Text>
@@ -98,7 +104,18 @@ export default function OwnerOrderDetail() {
         {o.delivery_method === "in_house" && (
           <View>
             <Text style={styles.section}>In-House Delivery Tracking</Text>
-            <View style={{ height: 180, borderRadius: radius.md, overflow: "hidden" }}>
+            <View style={styles.trackMetaBox}>
+              <Text style={styles.trackStatus}>
+                {o.status === "completed" ? "✓ Delivered / received"
+                  : track?.moving ? `🛵 Out for delivery · ETA ~${track.eta_min} min`
+                  : `Status: ${LABEL[o.status] || o.status}`}
+              </Text>
+              <Text style={styles.trackAddr}>📍 {o.delivery_address}</Text>
+              {track?.lat != null && (
+                <Text style={styles.trackCoords}>Rider position: {Number(track.lat).toFixed(5)}, {Number(track.lng).toFixed(5)}</Text>
+              )}
+            </View>
+            <View style={{ height: 180, borderRadius: radius.md, overflow: "hidden", marginTop: spacing.sm }}>
               <LiveTrackMap orderId={o.id} riderEmoji="🛵" />
             </View>
             <Pressable testID="share-loc-btn" onPress={shareLocation} disabled={locBusy || riderMut.isPending} style={styles.locBtn}>
@@ -140,4 +157,10 @@ const styles = StyleSheet.create({
   locBtn: { marginTop: spacing.md, backgroundColor: colors.brandTertiary, paddingVertical: 12, borderRadius: radius.pill, alignItems: "center" },
   locText: { color: colors.onBrandTertiary, fontWeight: "700", fontSize: 13 },
   msg: { color: colors.success, fontSize: 12, marginTop: spacing.xs, textAlign: "center" },
+  msgCustomerBtn: { backgroundColor: colors.brandTertiary, paddingVertical: 13, borderRadius: radius.pill, alignItems: "center" },
+  msgCustomerText: { color: colors.onBrandTertiary, fontWeight: "800", fontSize: 13 },
+  trackMetaBox: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, gap: 4 },
+  trackStatus: { color: colors.onSurface, fontWeight: "700", fontSize: 13 },
+  trackAddr: { color: colors.onSurfaceSecondary, fontSize: 13 },
+  trackCoords: { color: colors.muted, fontSize: 11 },
 });

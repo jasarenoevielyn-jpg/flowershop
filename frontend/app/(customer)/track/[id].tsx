@@ -2,8 +2,8 @@ import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { colors, spacing, radius } from "@/src/theme";
 import { api } from "@/src/api";
 import MapView from "@/src/components/LeafletMap";
@@ -25,6 +25,28 @@ export default function Track() {
 
   const { data: o, isLoading } = useQuery({ queryKey: ["order", id], queryFn: () => api(`/orders/${id}`), enabled: !!id, refetchInterval: 6000 });
   const { data: track } = useQuery({ queryKey: ["track", id], queryFn: () => api(`/orders/${id}/tracking`), enabled: !!id, refetchInterval: 4000 });
+
+  // Live ETA countdown — ticks every second, resyncs when a fresh eta arrives.
+  const [nowTs, setNowTs] = useState(Date.now());
+  const etaTargetRef = useRef<number | null>(null);
+  useEffect(() => { const t = setInterval(() => setNowTs(Date.now()), 1000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    if (track?.moving && track.eta_min > 0) {
+      const target = Date.now() + track.eta_min * 60000;
+      if (etaTargetRef.current == null || Math.abs(target - etaTargetRef.current) > 45000) etaTargetRef.current = target;
+    } else {
+      etaTargetRef.current = null;
+    }
+  }, [track?.moving, track?.eta_min]);
+  const remainMs = etaTargetRef.current ? Math.max(0, etaTargetRef.current - nowTs) : 0;
+  const etaMM = Math.floor(remainMs / 60000);
+  const etaSS = Math.floor((remainMs % 60000) / 1000);
+
+  const completeMut = useMutation({
+    mutationFn: () => api(`/orders/${id}/complete`, { method: "POST" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["order", id] }); qc.invalidateQueries({ queryKey: ["my-orders"] }); },
+  });
+
   // Poll payment reconciliation while unpaid gcash
   useQuery({
     queryKey: ["pay-status", id],
@@ -39,6 +61,7 @@ export default function Track() {
   const stageIdx = flow.indexOf(o.status);
   const isPickup = o.delivery_method === "pickup";
   const riderEmoji = o.delivery_method === "third_party" ? "🚚" : "🛵";
+  const canComplete = !["pending", "completed", "cancelled"].includes(o.status);
 
   const payNow = async () => {
     setPaying(true);
@@ -73,6 +96,30 @@ export default function Track() {
           <View style={styles.liveRow} testID="live-tracking-banner">
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>{riderEmoji} Rider is on the way — watch the pin move</Text>
+          </View>
+        )}
+
+        {!isPickup && track?.moving && remainMs > 0 && (
+          <View style={styles.etaCard} testID="eta-countdown">
+            <Text style={styles.etaLabel}>ARRIVING IN</Text>
+            <Text style={styles.etaValue}>{etaMM}:{String(etaSS).padStart(2, "0")}</Text>
+            <Text style={styles.etaHint}>live estimate · updating</Text>
+          </View>
+        )}
+
+        <View style={styles.actionRow}>
+          <Pressable testID="message-shop-btn" onPress={() => router.push(`/(customer)/chat/${o.id}` as any)} style={styles.msgBtn}>
+            <Text style={styles.msgBtnText}>💬 Message Shop</Text>
+          </Pressable>
+          {canComplete && (
+            <Pressable testID="complete-order-btn" onPress={() => completeMut.mutate()} disabled={completeMut.isPending} style={styles.completeBtn}>
+              <Text style={styles.completeText}>{completeMut.isPending ? "…" : "✓ I received my order"}</Text>
+            </Pressable>
+          )}
+        </View>
+        {o.status === "completed" && (
+          <View style={styles.doneBanner} testID="order-completed-banner">
+            <Text style={styles.doneText}>✓ Order completed — thank you for choosing Elaya!</Text>
           </View>
         )}
 
@@ -142,6 +189,17 @@ const styles = StyleSheet.create({
   liveRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.sm, backgroundColor: colors.brandPrimary + "14", paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill, alignSelf: "flex-start" },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brandPrimary },
   liveText: { color: colors.brandPrimary, fontSize: 12, fontWeight: "700" },
+  etaCard: { marginTop: spacing.md, backgroundColor: colors.surfaceInverse, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: "center" },
+  etaLabel: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: "700", letterSpacing: 1 },
+  etaValue: { color: "#FFFFFF", fontSize: 40, fontWeight: "800", fontVariant: ["tabular-nums"], marginVertical: 2 },
+  etaHint: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
+  actionRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  msgBtn: { flex: 1, backgroundColor: colors.brandTertiary, paddingVertical: 13, borderRadius: radius.pill, alignItems: "center" },
+  msgBtnText: { color: colors.onBrandTertiary, fontWeight: "800", fontSize: 13 },
+  completeBtn: { flex: 1.4, backgroundColor: colors.success, paddingVertical: 13, borderRadius: radius.pill, alignItems: "center" },
+  completeText: { color: colors.onSuccess, fontWeight: "800", fontSize: 13 },
+  doneBanner: { marginTop: spacing.md, backgroundColor: colors.success + "18", borderRadius: radius.md, padding: spacing.md, alignItems: "center" },
+  doneText: { color: colors.success, fontWeight: "700", fontSize: 13 },
   payBanner: { flexDirection: "row", alignItems: "center", padding: spacing.md, borderRadius: radius.md, marginTop: spacing.md, gap: spacing.md },
   payTitle: { fontWeight: "800", fontSize: 14 },
   payRef: { color: colors.muted, fontSize: 11, marginTop: 2 },

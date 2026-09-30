@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { colors, spacing, radius } from "@/src/theme";
 import { useCart } from "@/src/cart";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
 
 const METHODS = [
   { key: "in_house", label: "In-House Delivery", desc: "Shop's own rider · live tracking", icon: "🛵" },
@@ -21,8 +22,11 @@ export default function Checkout() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { items, total, clear } = useCart();
+  const { user } = useAuth();
   const { data: shops = [] } = useQuery({ queryKey: ["shops"], queryFn: () => api("/shops") });
 
+  const [contactName, setContactName] = useState(user?.name || "");
+  const [contactPhone, setContactPhone] = useState("");
   const [addr, setAddr] = useState("San Antonio, Biñan, Laguna");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [notes, setNotes] = useState("");
@@ -50,12 +54,16 @@ export default function Checkout() {
 
   const placeOrder = async () => {
     if (validItems.length === 0) { setErr("Your cart has no shop items."); return; }
+    if (!contactName.trim()) { setErr("Please enter your full name."); return; }
+    const phoneDigits = contactPhone.replace(/\D/g, "");
+    if (phoneDigits.length < 7) { setErr("Please enter a valid contact phone number."); return; }
     const chosen = allowed.includes(method) ? method : allowed[0];
     if (chosen !== "pickup" && !addr) { setErr("Please enter a delivery address"); return; }
     setLoading(true); setErr(null);
     try {
       const order = await api("/orders", { method: "POST", body: JSON.stringify({
         items: validItems.map((i) => ({ product_id: i.product_id, shop_id: i.shop_id, name: i.name, image: i.image, unit_price: i.unit_price, quantity: i.quantity })),
+        contact_name: contactName.trim(), contact_phone: contactPhone.trim(),
         delivery_method: chosen,
         delivery_address: chosen === "pickup" ? "Pick-Up at shop" : addr,
         delivery_lat: coords?.lat ?? 14.3419, delivery_lng: coords?.lng ?? 121.0803,
@@ -83,6 +91,14 @@ export default function Checkout() {
         <View style={{ width: 24 }} />
       </View>
       <KeyboardAwareScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.lg, paddingBottom: 200 }} keyboardShouldPersistTaps="handled" bottomOffset={20}>
+        <View>
+          <Text style={styles.section}>Contact Details</Text>
+          <Text style={styles.fieldLabel}>Full Name *</Text>
+          <TextInput testID="contact-name-input" value={contactName} onChangeText={setContactName} placeholder="Juan Dela Cruz" placeholderTextColor={colors.muted} style={styles.input} />
+          <Text style={[styles.fieldLabel, { marginTop: spacing.sm }]}>Phone Number *</Text>
+          <TextInput testID="contact-phone-input" value={contactPhone} onChangeText={setContactPhone} placeholder="0917 123 4567" placeholderTextColor={colors.muted} keyboardType="phone-pad" style={styles.input} />
+        </View>
+
         <View>
           <Text style={styles.section}>Delivery Method</Text>
           {METHODS.filter((m) => allowed.includes(m.key)).map((m) => (
@@ -157,6 +173,7 @@ const styles = StyleSheet.create({
   back: { fontSize: 22, color: colors.onSurface },
   title: { fontSize: 18, fontWeight: "700", color: colors.onSurface },
   section: { fontSize: 14, fontWeight: "700", color: colors.onSurface, marginBottom: spacing.sm },
+  fieldLabel: { fontSize: 12, fontWeight: "600", color: colors.onSurfaceSecondary, marginBottom: 6 },
   input: { backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 12, minHeight: 48, color: colors.onSurface, fontSize: 14 },
   pinBtn: { marginTop: spacing.sm, backgroundColor: colors.brandTertiary, paddingVertical: 10, borderRadius: radius.pill, alignItems: "center" },
   pinText: { color: colors.onBrandTertiary, fontWeight: "700", fontSize: 12 },

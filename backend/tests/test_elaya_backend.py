@@ -222,6 +222,8 @@ class TestOrders:
         payload = {
             "items": [{"product_id": p["id"], "shop_id": p["shop_id"], "name": p["name"],
                        "image": p.get("image"), "unit_price": p["price"], "quantity": 1}],
+            "contact_name": "TEST Buyer",
+            "contact_phone": "0917-000-0001",
             "delivery_method": method,
             "delivery_address": "TEST Addr",
             "delivery_lat": 14.34, "delivery_lng": 121.08,
@@ -305,6 +307,7 @@ class TestPayments:
         p = products[0]
         pl = {"items": [{"product_id": p["id"], "shop_id": p["shop_id"], "name": p["name"],
                         "image": p.get("image"), "unit_price": p["price"], "quantity": 1}],
+              "contact_name": "TEST Buyer", "contact_phone": "0917-000-0001",
               "delivery_method": "in_house", "delivery_address": "A", "payment_method": "cod"}
         ch = bearer(customer_auth["access_token"])
         order = api_client.post(f"{BASE_URL}/api/orders", json=pl, headers=ch, timeout=20).json()
@@ -326,6 +329,7 @@ class TestPayments:
         p = products[0]
         pl = {"items": [{"product_id": p["id"], "shop_id": p["shop_id"], "name": p["name"],
                         "image": p.get("image"), "unit_price": p["price"], "quantity": 1}],
+              "contact_name": "TEST Buyer", "contact_phone": "0917-000-0001",
               "delivery_method": "in_house", "delivery_address": "A", "payment_method": "gcash"}
         ch = bearer(customer_auth["access_token"])
         order = api_client.post(f"{BASE_URL}/api/orders", json=pl, headers=ch, timeout=20).json()

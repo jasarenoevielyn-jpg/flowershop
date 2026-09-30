@@ -1,0 +1,53 @@
+{
+  "summary": "Verified the new Jan-2026 features on top of the working Elaya app. Backend pytest suite: 55/55 passing (43 regression + 12 new feature tests). Coverage of the new work: (1) Checkout mandatory contact — POST /api/orders returns 422 without contact_name/contact_phone AND with empty strings (min_length=1 validated), returns 200 with them, values persist on GET /api/orders/{id}. Frontend /checkout renders `contact-name-input` (prefilled from user.name) and `contact-phone-input` with 'Full Name *' / 'Phone Number *' labels and a `checkout-error` component wired to `place-order-btn`. (2) Order chat — GET/POST /api/orders/{oid}/messages work for the order's customer AND for the shop-owner whose shop is in the order; a customer send fires kind='chat' notification to the owner and an owner send fires kind='chat' to the customer; unrelated owner gets 403; empty text returns 422; unknown order returns 404. Frontend: customer Track screen shows `message-shop-btn` → /(customer)/chat/[id] → chat screen has `order-chat`, `chat-input`, `chat-send-btn`; sent message appears right-aligned as a pink bubble (verified live). (3) Delivery ETA countdown — /api/orders/{id}/tracking correctly returns eta_min=0 & moving=false pre-out_for_delivery, and eta_min>=1 (1..8) & moving=true after the owner advances status to out_for_delivery; pickup orders don't move. Frontend `eta-countdown` container is present in code and renders while moving=true && progress<1.0 (see caveat below). `live-tracking-banner` renders as expected on an out-for-delivery order ('Rider is on the way — watch the pin move'). (4) Customer 'Completed' button — POST /api/orders/{oid}/complete flips status to 'completed', marks COD payment_status='paid', sets completed_by_customer=true, and posts a 'confirmed receipt' notification to the shop owner; is idempotent (second call returns completed); returns 403 for owner role, 404 for unknown id. Frontend Track shows `complete-order-btn` ('I received my order') when status is not pending/completed/cancelled (verified on the ELY-323837 out_for_delivery order). (5) Owner delivery tracking visibility — owner order detail retains `message-customer-btn`, live status/ETA, delivery address, rider coords and share-loc-btn (route file structure confirmed). (6) Regression — full order flow (in_house/third_party/pickup + status advance + rider location + COD/GCash pay init) all still pass; 3-role auth + admin approve/reject + product 360 image lists + favorites + reviews eligibility all still green. NO deprecated Expo packages detected in the code paths exercised.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/orders — contact_name/contact_phone", "issue": "Only min_length=1 is enforced. Any single non-blank character passes (e.g. contact_phone='x'). Backend does not validate phone format. Frontend should keep the digit/length guard; consider a light regex on the server too."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Track screen ETA countdown (customer)", "issue": "On stale out_for_delivery orders (out_for_delivery_at > ~8 min ago) the tracking API returns moving=false + progress=1.0, so `eta-countdown` does not render even though the order still shows 'Out for Delivery' status. This is technically correct but visually confusing: banner reads 'Arriving in ~0 min' while the pin has 'arrived' at the destination. Consider clamping the simulated delivery to a minimum active window or auto-transitioning to 'completed'/'ready_for_pickup' when progress hits 1.0.", "testID": "eta-countdown", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "customer /home", "issues": ["A residual 'TEST_Bouquet' with ₱500 placeholder image was still visible in the Curated Bouquets rail — leftover from earlier iteration test runs. Not from this iteration; recommend cleanup via db.products.updateMany({name:/^TEST_/},{$set:{status:'deleted'}})."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_chat_eta_complete.py",
+    "/app/backend/tests/test_elaya_backend.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/test_admin_and_primary_flowers.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Clean residual TEST_Bouquet products from Mongo so /home no longer shows placeholder examples: db.products.updateMany({name:{$regex:'^TEST_'}},{$set:{status:'deleted'}}).",
+    "(Optional polish) When an in_house order has been 'out_for_delivery' for longer than the 8-minute simulated window and progress caps at 1.0, either auto-mark it 'ready_for_pickup at customer'/keep eta-countdown pinned at 01:00, or hide the ETA banner instead of rendering 'Arriving in ~0 min' with no live countdown — currently the customer sees stale wording.",
+    "(Optional) Add a lightweight phone-format check on the server (Pydantic validator) so a single character can't satisfy contact_phone. Frontend already guards this, but a defense-in-depth check is trivial."
+  ],
+  "critical_code_review_comments": [
+    "server.py `send_message` (l.568-586) correctly enforces access via `order_for_user` and generates `kind='chat'` notifications to the opposite party — verified end-to-end with two accounts.",
+    "server.py `complete_order` (l.543-561) is idempotent (returns early if already completed), settles COD → paid, and pushes 'confirmed receipt' notification per shop_id. All three branches covered by tests.",
+    "server.py `create_order` (l.417) uses `contact_name.strip()` and `contact_phone.strip()`; combined with Pydantic min_length=1 this rejects both missing and empty-string inputs.",
+    "server.py `order_tracking` (l.486-526) is public (no auth), returns interpolated rider position from shop→customer over ~8min; eta_min is bounded 1..8 while moving, else 0 — matches the frontend `eta-countdown` UX.",
+    "Frontend OrderChat.tsx wraps FlatList of messages, uses testID='order-chat' on the container and correctly right-aligns bubbles for sender_id==me — visually verified.",
+    "checkout.tsx (l.97-99) prefills `contact-name-input` from user.name and leaves `contact-phone-input` empty; both are marked with red '*' labels — verified in UI."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_chat_eta_complete.py (NEW — 12 tests for checkout mandatory contact, order chat, ETA, and complete)",
+    "/app/backend/tests/test_elaya_backend.py (added contact_name+contact_phone to _create_order helper and both pay-flow payloads so the existing regression suite matches the new required schema)",
+    "/app/backend/tests/test_new_features.py (added contact_name+contact_phone to the 3 order-building helpers so live-tracking / stock / manual-rider tests keep passing under the new schema)"
+  ],
+  "success_rate": {
+    "backend": "100% (55/55 pytest passing)",
+    "frontend": "100% for the exercised flows (customer login → orders list → track (pending + out_for_delivery) → chat (send + right-aligned bubble); checkout screen renders both required testIDs and place-order-btn/error component wire up)"
+  },
+  "seed_data_creation": "None new. Reused seeded accounts and pre-existing customer orders. TEST_* helpers auto-clean their own products.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend/tests && EXPO_PUBLIC_BACKEND_URL=$(grep EXPO_PUBLIC_BACKEND_URL /app/frontend/.env | cut -d= -f2) pytest -v -n0 --junitxml=/app/test_reports/pytest/pytest_results.xml. All 55 tests should pass. The new-feature file is test_chat_eta_complete.py; it relies on cross-test pytest.chat_order_id / pytest.eta_order_id handoff, so KEEP -n0 (don't parallelize). Frontend login testIDs on landing: `have-account-btn` opens the sign-in modal which has `email-input`, `password-input`, `signin-btn`. Track screen testIDs of interest: `live-tracking-banner`, `eta-countdown` (only when moving && progress<1), `message-shop-btn`, `complete-order-btn`, `order-completed-banner`. Chat screen testIDs: `order-chat`, `chat-input`, `chat-send-btn`. Checkout testIDs: `contact-name-input`, `contact-phone-input`, `place-order-btn`, `checkout-error`. NOTE: seed drift issue flagged in iteration_5/6 did NOT recur this run — status of seeded users/shops was intact throughout.",
+  "rca_of_issue": "N/A — no bug encountered this iteration. Only one visual polish item (stale out_for_delivery eta rendering as '~0 min') captured under action_items."
+}

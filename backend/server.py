@@ -120,12 +120,17 @@ class OrderItemIn(BaseModel):
 
 class OrderIn(BaseModel):
     items: List[OrderItemIn]
+    contact_name: str = Field(min_length=1)
+    contact_phone: str = Field(min_length=1)
     delivery_method: Literal["in_house", "third_party", "pickup"] = "in_house"
     delivery_address: str = ""
     delivery_lat: Optional[float] = BINAN["lat"]
     delivery_lng: Optional[float] = BINAN["lng"]
     notes: Optional[str] = ""
     payment_method: Literal["cod", "gcash"] = "cod"
+
+class MessageIn(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
 
 class OrderStatusIn(BaseModel):
     status: str
@@ -409,6 +414,7 @@ async def create_order(data: OrderIn, u=Depends(require("customer"))):
     order = {
         "id": oid, "order_no": f"ELY-{oid[:6].upper()}",
         "customer_id": u["id"], "customer_name": u["name"],
+        "contact_name": data.contact_name.strip(), "contact_phone": data.contact_phone.strip(),
         "items": [i.model_dump() for i in data.items], "shop_ids": shop_ids,
         "delivery_method": data.delivery_method,
         "delivery_address": data.delivery_address, "delivery_lat": data.delivery_lat, "delivery_lng": data.delivery_lng,
@@ -518,6 +524,67 @@ async def order_tracking(oid: str):
     moving = status == "out_for_delivery" and progress < 1.0
     eta_min = max(1, round((1 - progress) * 8)) if moving else 0
     return {**base, "lat": lat, "lng": lng, "moving": moving, "progress": round(progress, 3), "eta_min": eta_min}
+
+# ---------- Order access helper, completion & chat ----------
+async def order_for_user(oid: str, u: dict) -> dict:
+    """Return the order if this user may view it (customer owner, shop owner in
+    order, or admin), else raise. Shared by chat + completion routes."""
+    o = await db.orders.find_one({"id": oid})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if u["role"] == "customer" and o["customer_id"] != u["id"]:
+        raise HTTPException(403)
+    if u["role"] == "flower_owner":
+        shop = await db.shops.find_one({"owner_id": u["id"]})
+        if not shop or shop["id"] not in o["shop_ids"]:
+            raise HTTPException(403)
+    return o
+
+@api.post("/orders/{oid}/complete")
+async def complete_order(oid: str, u=Depends(require("customer"))):
+    """Customer confirms they received the order. Marks it completed and
+    notifies the shop owner(s). COD is settled as paid on receipt."""
+    o = await db.orders.find_one({"id": oid})
+    if not o or o["customer_id"] != u["id"]:
+        raise HTTPException(404, "Order not found")
+    if o.get("status") == "completed":
+        return {"ok": True, "status": "completed"}
+    upd = {"status": "completed", "completed_by_customer": True, "completed_at": now_iso(), "updated_at": now_iso()}
+    if o.get("payment_method") == "cod":
+        upd["payment_status"] = "paid"
+    await db.orders.update_one({"id": oid}, {"$set": upd})
+    for sid in o["shop_ids"]:
+        shop = await db.shops.find_one({"id": sid}, {"_id": 0})
+        if shop:
+            await notify(shop["owner_id"], "Order received ✅",
+                         f"{u['name']} confirmed receipt of order {o['order_no']}.", order_id=oid, kind="order")
+    return {"ok": True, "status": "completed"}
+
+@api.get("/orders/{oid}/messages")
+async def list_messages(oid: str, u=Depends(get_current_user)):
+    await order_for_user(oid, u)
+    return await db.messages.find({"order_id": oid}, {"_id": 0}).sort("created_at", 1).to_list(2000)
+
+@api.post("/orders/{oid}/messages")
+async def send_message(oid: str, data: MessageIn, u=Depends(get_current_user)):
+    o = await order_for_user(oid, u)
+    text = data.text.strip()
+    msg = {"id": str(uuid.uuid4()), "order_id": oid, "sender_id": u["id"], "sender_name": u["name"],
+           "sender_role": u["role"], "text": text, "created_at": now_iso()}
+    await db.messages.insert_one(msg)
+    msg.pop("_id", None)
+    preview = text[:60]
+    if u["role"] == "customer":
+        for sid in o["shop_ids"]:
+            shop = await db.shops.find_one({"id": sid}, {"_id": 0})
+            if shop:
+                await notify(shop["owner_id"], f"💬 {u['name']}",
+                             f"Order {o['order_no']}: {preview}", order_id=oid, kind="chat")
+    else:
+        await notify(o["customer_id"], "💬 Message from the shop",
+                     f"Order {o['order_no']}: {preview}", order_id=oid, kind="chat")
+    return msg
+
 
 # ---------- Payments (PayMongo GCash + COD) ----------
 def paymongo_headers():

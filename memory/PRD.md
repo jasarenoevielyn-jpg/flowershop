@@ -34,6 +34,14 @@ Design and develop ELAYA, a mobile flower marketplace for Biñan, Laguna. Intera
 - Recreated backend/.env (MONGO_URL, DB_NAME, JWT_SECRET, PAYMONGO_SECRET_KEY=sk_test_..., ADMIN_SIGNUP_CODE=ELAYA-ADMIN-2026, EMERGENT_LLM_KEY) and frontend/.env (EXPO_PUBLIC_BACKEND_URL + packager vars).
 - Verified: object storage upload+retrieval, 43/43 backend pytest, frontend renders all images + 360 badges, admin login.
 
+## Session (2026-06-30b) — 5 feature additions
+- Order Chat: per-order customer↔owner messaging (GET/POST /api/orders/{id}/messages + notifications, kind=chat). Shared OrderChat component + (customer)/chat/[id] & (owner)/chat/[id] routes. Entry buttons on Track & owner order detail.
+- Delivery ETA: live mm:ss countdown card on customer Track during in-house out_for_delivery (driven by /tracking eta_min).
+- Owner tracking visibility: owner order detail shows live status + ETA + address + rider coords + LiveTrackMap.
+- Customer Completed: POST /api/orders/{id}/complete → status=completed, COD→paid, notifies owner; "I received my order" button + completed banner.
+- Checkout mandatory contact: OrderIn now requires contact_name + contact_phone (422 if missing); checkout has Full Name (prefilled) + Phone fields with validation.
+- Tested: 55/55 backend pytest, all UI flows OK.
+
 ## Backlog / Remaining
 - P1: Google Maps API key (user will add later) — currently Leaflet-based map UI.
 - P2: Rotate360 skeleton loader on first frame; periodic TEST_* cleanup.

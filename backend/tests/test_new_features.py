@@ -28,6 +28,8 @@ def _new_in_house_order(api_client, customer_auth, product):
     payload = {
         "items": [{"product_id": product["id"], "shop_id": product["shop_id"], "name": product["name"],
                    "image": product.get("image"), "unit_price": product["price"], "quantity": 1}],
+        "contact_name": "TEST Buyer",
+        "contact_phone": "0917-000-0001",
         "delivery_method": "in_house",
         "delivery_address": "TEST Tracking Addr",
         "delivery_lat": 14.35, "delivery_lng": 121.09,
@@ -99,6 +101,7 @@ class TestLiveTracking:
         prod = _pick_bouquet(api_client, shop_ids)
         pl = {"items": [{"product_id": prod["id"], "shop_id": prod["shop_id"], "name": prod["name"],
                          "image": prod.get("image"), "unit_price": prod["price"], "quantity": 1}],
+              "contact_name": "TEST Buyer", "contact_phone": "0917-000-0001",
               "delivery_method": "pickup", "delivery_address": "Pickup",
               "payment_method": "cod"}
         ch = bearer(customer_auth["access_token"])
@@ -151,6 +154,8 @@ class TestStockDecrement:
         payload = {
             "items": [{"product_id": pid, "shop_id": prod["shop_id"], "name": prod["name"],
                        "image": prod.get("image"), "unit_price": prod["price"], "quantity": qty}],
+            "contact_name": "TEST Buyer",
+            "contact_phone": "0917-000-0001",
             "delivery_method": "in_house",
             "delivery_address": "TEST Stock",
             "delivery_lat": 14.34, "delivery_lng": 121.08,
